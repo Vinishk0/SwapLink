@@ -17,4 +17,3 @@ logs
 .env.*
 !.env.example
 tests
-README.md
