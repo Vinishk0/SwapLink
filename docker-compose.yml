@@ -1,0 +1,53 @@
+name: swaplink
+
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Inside the compose network the database lives on host `db`, not localhost.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-swaplink}:${POSTGRES_PASSWORD:-swaplink}@db:5432/${POSTGRES_DB:-swaplink}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+    command: >
+      sh -c "alembic upgrade head && python -m app"
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-swaplink}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-swaplink}
+      POSTGRES_DB: ${POSTGRES_DB:-swaplink}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-swaplink} -d ${POSTGRES_DB:-swaplink}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - redisdata:/data
+
+volumes:
+  pgdata:
+  redisdata:
