@@ -60,25 +60,44 @@ docker compose up -d --build
 Поднимутся PostgreSQL, Redis и бот; миграции применяются автоматически при старте.
 Логи: `docker compose logs -f bot`.
 
-### Локально
+### Локально (без Docker)
 
 ```bash
-python -m venv .venv && .venv\Scripts\activate
+python -m venv .venv
+```
+
+```bash
+.venv\Scripts\activate
 ```
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-Скопируйте `.env.example` в `.env`, укажите `BOT_TOKEN`, `ADMIN_IDS` и для запуска без
-Postgres — `DATABASE_URL=sqlite+aiosqlite:///data/swaplink.db`. Затем:
+Скопируйте `.env.example` в `.env` и заполните `BOT_TOKEN` и `ADMIN_IDS`
+(один ID или несколько через запятую). `DATABASE_URL` по умолчанию — SQLite в `data/`,
+никакой инфраструктуры не нужно. Запуск:
 
 ```bash
 python -m app
 ```
 
 Таблицы создаются автоматически при первом запуске; для управляемых миграций используйте
-`alembic upgrade head`.
+`alembic upgrade head`. Если конфигурация неполна, база недоступна или токен неверный,
+бот пишет понятную причину вместо трейсбека.
+
+### PyCharm
+
+В репозитории лежат готовые конфигурации запуска (`.run/`) — они появляются в списке
+сразу после открытия проекта:
+
+* **Bot (python -m app)** — запуск бота;
+* **Tests (pytest)** — весь тест-сьют;
+* **DB migrate (alembic upgrade head)** — применить миграции.
+
+Останется указать интерпретатор: *Settings → Project → Python Interpreter →
+Add Local Interpreter → Existing → `.venv\Scripts\python.exe`*. Файл `.env` бот читает сам,
+плагин EnvFile не нужен.
 
 Чтобы сразу получить рабочие направления обмена, поставьте `SEED_DEMO_DATA=true` —
 будут созданы USDT/USD/EUR/RUB и четыре пары. Иначе добавьте валюты через

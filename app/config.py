@@ -5,9 +5,10 @@ from __future__ import annotations
 from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -24,7 +25,9 @@ class Settings(BaseSettings):
 
     # --- Telegram ---
     bot_token: str = Field(min_length=10)
-    admin_ids: list[int] = Field(default_factory=list)
+    #: `NoDecode` keeps the raw string: a single id like `123` is valid JSON and
+    #: would otherwise arrive as an int instead of a list.
+    admin_ids: Annotated[list[int], NoDecode] = Field(default_factory=list)
     drop_pending_updates: bool = True
 
     # --- Database ---
@@ -51,9 +54,21 @@ class Settings(BaseSettings):
     @field_validator("admin_ids", mode="before")
     @classmethod
     def _parse_admin_ids(cls, value: object) -> object:
-        """Accept `123,456` as well as a JSON list."""
+        """Accept `123`, `123,456`, `123; 456`, `[123, 456]` and real lists."""
+        if value is None:
+            return []
+        if isinstance(value, int):
+            return [value]
         if isinstance(value, str):
-            return [int(chunk) for chunk in value.replace(";", ",").split(",") if chunk.strip()]
+            cleaned = value.strip().strip("[]")
+            chunks = [c.strip() for c in cleaned.replace(";", ",").split(",") if c.strip()]
+            try:
+                return [int(chunk) for chunk in chunks]
+            except ValueError as exc:
+                raise ValueError(
+                    "ADMIN_IDS must contain numeric Telegram ids separated by commas, "
+                    f"got: {value!r}"
+                ) from exc
         return value
 
     @field_validator("redis_url", "support_username", mode="before")
