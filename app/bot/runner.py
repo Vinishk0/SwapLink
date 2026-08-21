@@ -91,13 +91,19 @@ async def start_bot(settings: Settings | None = None) -> None:
     except (OperationalError, OSError) as exc:
         # asyncpg surfaces a bare ConnectionRefusedError, psycopg an OperationalError.
         reason = getattr(exc, "orig", None) or exc
+        hint = (
+            f"Проверьте, что путь доступен для записи (файл базы: {engine.url.database})."
+            if settings.is_sqlite
+            else (
+                "Запустите Postgres командой `docker compose up -d db` "
+                "или укажите в .env локальную базу:\n"
+                "  DATABASE_URL=sqlite+aiosqlite:///data/swaplink.db"
+            )
+        )
         raise StartupError(
             "Не удалось подключиться к базе данных.\n"
             f"  DATABASE_URL: {engine.url.render_as_string(hide_password=True)}\n"
-            f"  Причина: {reason}\n\n"
-            "Запустите Postgres командой `docker compose up -d db` "
-            "или укажите в .env локальную базу:\n"
-            "  DATABASE_URL=sqlite+aiosqlite:///data/swaplink.db"
+            f"  Причина: {reason}\n\n{hint}"
         ) from exc
 
     session_factory = create_session_factory(engine)

@@ -20,18 +20,25 @@ logger = logging.getLogger(__name__)
 _engine: AsyncEngine | None = None
 
 
-def _prepare_sqlite_path(url: str) -> None:
-    """Make sure the directory of a file-based SQLite database exists."""
-    prefix = "sqlite+aiosqlite:///"
-    if not url.startswith(prefix):
-        return
-    raw_path = url[len(prefix) :]
-    if not raw_path or raw_path == ":memory:":
-        return
+def normalize_database_url(url: str) -> str:
+    """Anchor a file-based SQLite path to the project root and create its folder.
+
+    `sqlite+aiosqlite:///data/swaplink.db` is relative to the *current working
+    directory*, so the bot would look for a different file depending on where it
+    was started from (PyCharm, a service, a shell in another folder). Resolving
+    it against the project root makes the run location irrelevant.
+    """
+    scheme, separator, raw_path = url.partition(":///")
+    if not separator or not scheme.startswith("sqlite"):
+        return url
+    if not raw_path or raw_path.startswith(":memory:"):
+        return url
+
     path = Path(raw_path)
     if not path.is_absolute():
         path = BASE_DIR / path
     path.parent.mkdir(parents=True, exist_ok=True)
+    return f"{scheme}:///{path.resolve().as_posix()}"
 
 
 def get_engine() -> AsyncEngine:
@@ -41,13 +48,13 @@ def get_engine() -> AsyncEngine:
         return _engine
 
     settings = get_settings()
-    _prepare_sqlite_path(settings.database_url)
+    database_url = normalize_database_url(settings.database_url)
 
     kwargs: dict[str, object] = {"echo": settings.db_echo, "pool_pre_ping": True}
     if not settings.is_sqlite:
         kwargs |= {"pool_size": 10, "max_overflow": 20, "pool_recycle": 1800}
 
-    _engine = create_async_engine(settings.database_url, **kwargs)  # type: ignore[arg-type]
+    _engine = create_async_engine(database_url, **kwargs)  # type: ignore[arg-type]
 
     if settings.is_sqlite:
         enable_sqlite_pragmas(_engine)

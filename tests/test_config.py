@@ -59,3 +59,28 @@ def test_support_username_and_base_currency_are_normalised() -> None:
     assert settings.support_username == "operator"
     assert settings.base_currency == "USDT"
     assert settings.is_sqlite is True
+
+
+def test_relative_sqlite_path_is_anchored_to_the_project_root(
+    tmp_path: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bot must open the same file no matter where it was started from."""
+    from app.config import BASE_DIR
+    from app.db.engine import normalize_database_url
+
+    monkeypatch.chdir(tmp_path)  # type: ignore[arg-type]
+    normalized = normalize_database_url("sqlite+aiosqlite:///data/swaplink.db")
+
+    assert normalized == f"sqlite+aiosqlite:///{(BASE_DIR / 'data' / 'swaplink.db').as_posix()}"
+    assert (BASE_DIR / "data").is_dir()
+
+
+def test_non_file_urls_are_left_alone() -> None:
+    from app.db.engine import normalize_database_url
+
+    for url in (
+        "sqlite+aiosqlite://",
+        "sqlite+aiosqlite:///:memory:",
+        "postgresql+asyncpg://user:pass@db:5432/swaplink",
+    ):
+        assert normalize_database_url(url) == url

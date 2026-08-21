@@ -12,6 +12,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.db.base import Base
+from app.db.engine import normalize_database_url
 from app.db.models import *  # noqa: F401,F403  (import models so autogenerate sees them)
 
 config = context.config
@@ -23,14 +24,15 @@ if config.config_file_name is not None:
 def get_url() -> str:
     """DATABASE_URL wins; `.env` is honoured through the app settings."""
     url = os.getenv("DATABASE_URL")
-    if url:
-        return url
-    try:
-        from app.config import get_settings
+    if not url:
+        try:
+            from app.config import get_settings
 
-        return get_settings().database_url
-    except Exception:  # noqa: BLE001 - settings need BOT_TOKEN, migrations do not
-        return config.get_main_option("sqlalchemy.url", "sqlite+aiosqlite:///data/swaplink.db")
+            url = get_settings().database_url
+        except Exception:  # settings need BOT_TOKEN, migrations do not
+            url = config.get_main_option("sqlalchemy.url", "sqlite+aiosqlite:///data/swaplink.db")
+    # Relative SQLite paths must not depend on the current working directory.
+    return normalize_database_url(url)
 
 
 target_metadata = Base.metadata
