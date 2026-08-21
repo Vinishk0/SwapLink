@@ -132,3 +132,49 @@ async def test_summary_reports_the_inviter_earnings(
     inviter_summary = await referrals_service.get_summary(session, inviter, settings)
     assert inviter_summary.referrals_count == 1
     assert inviter_summary.is_referral is False
+
+
+async def test_referrals_page_reports_what_each_of_them_earned(
+    session: AsyncSession, make_user, pair, settings: Settings
+) -> None:
+    from app.services import orders as orders_service
+    from app.services import users as users_service
+
+    inviter = await make_user(1)
+    big = await make_user(2)
+    small = await make_user(3)
+    idle = await make_user(4)
+    for invitee in (big, small, idle):
+        await referrals_service.bind_referrer(session, invitee, inviter.ref_code)
+
+    async def deal(user, amount: str) -> None:
+        order = await orders_service.create_order(
+            session, user=user, pair=pair, amount_from=Decimal(amount), settings=settings
+        )
+        await orders_service.confirm_order(session, order, admin_id=1, settings=settings)
+
+    await deal(big, "10000")  # 0.5% of 10 000 USDT
+    await deal(small, "100")
+    await deal(small, "100")
+
+    rows, total = await users_service.list_referrals_page(session, inviter.id, page=1, per_page=2)
+
+    assert total == 3
+    assert len(rows) == 2  # the page, not everything
+    # Sorted by earnings, so the valuable referrals come first.
+    assert [user.id for user, _ in rows] == [big.id, small.id]
+    assert [earned for _, earned in rows] == [Decimal("50"), Decimal("1")]
+
+    tail, _ = await users_service.list_referrals_page(session, inviter.id, page=2, per_page=2)
+    assert [user.id for user, _ in tail] == [idle.id]
+    assert tail[0][1] == Decimal("0")
+
+
+async def test_referrals_page_of_a_stranger_is_empty(session: AsyncSession, make_user) -> None:
+    from app.services import users as users_service
+
+    lonely = await make_user(9)
+    rows, total = await users_service.list_referrals_page(session, lonely.id)
+
+    assert rows == []
+    assert total == 0

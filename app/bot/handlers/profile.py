@@ -23,6 +23,7 @@ from app.services import users as users_service
 router = Router(name="profile")
 
 HISTORY_PER_PAGE = 10
+REFERRALS_PER_PAGE = 8
 SHARE_TEXT = "Обмен валют с реферальной скидкой — заходи по моей ссылке 👇"
 
 
@@ -92,7 +93,10 @@ async def cb_history(
         session, user.id, limit=HISTORY_PER_PAGE, offset=(page - 1) * HISTORY_PER_PAGE
     )
     await ui.show(
-        query, state, texts.history(transactions, settings), kb.history(page=page, pages=pages)
+        query,
+        state,
+        texts.history(transactions, settings, total=total),
+        kb.history(page=page, pages=pages),
     )
     await query.answer()
 
@@ -100,13 +104,23 @@ async def cb_history(
 @router.callback_query(ProfileCB.filter(F.action == "referrals"))
 async def cb_referrals(
     query: CallbackQuery,
+    callback_data: ProfileCB,
     session: AsyncSession,
     state: FSMContext,
     user: User,
     settings: Settings,
 ) -> None:
-    referrals = await users_service.list_referrals(session, user.id, limit=30)
-    await ui.show(query, state, texts.referrals_list(referrals, settings), kb.back_to_profile())
+    rows, total = await users_service.list_referrals_page(
+        session, user.id, page=callback_data.page, per_page=REFERRALS_PER_PAGE
+    )
+    pages = max(math.ceil(total / REFERRALS_PER_PAGE), 1)
+    page = min(max(callback_data.page, 1), pages)
+    await ui.show(
+        query,
+        state,
+        texts.referrals_list(rows, settings, total=total, page=page, per_page=REFERRALS_PER_PAGE),
+        kb.referrals(page=page, pages=pages),
+    )
     await query.answer()
 
 

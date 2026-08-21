@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import Sequence
+from decimal import Decimal
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Order, OrderStatus, User
+from app.db.models import Order, OrderStatus, Transaction, TransactionType, User
 
 #: Unambiguous alphabet: no O/0, I/1 — codes get retyped by hand.
 _CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _CODE_LENGTH = 8
+ZERO = Decimal("0")
 
 
 async def generate_ref_code(session: AsyncSession) -> str:
@@ -89,17 +91,42 @@ async def count_referrals(session: AsyncSession, user_id: int) -> int:
     return await session.scalar(select(func.count(User.id)).where(User.referrer_id == user_id)) or 0
 
 
-async def list_referrals(
-    session: AsyncSession, user_id: int, *, limit: int = 50, offset: int = 0
-) -> Sequence[User]:
-    stmt = (
-        select(User)
-        .where(User.referrer_id == user_id)
-        .order_by(User.referred_at.desc().nullslast(), User.id.desc())
-        .limit(limit)
-        .offset(offset)
+async def list_referrals_page(
+    session: AsyncSession, user_id: int, *, page: int = 1, per_page: int = 8
+) -> tuple[list[tuple[User, Decimal]], int]:
+    """One page of referrals, each with how much they earned for the inviter.
+
+    Returns `([(referral, earned), ...], total)`. Sorted by earnings so the
+    people who actually bring money are on the first page.
+    """
+    earned = (
+        select(
+            Transaction.source_user_id.label("source_user_id"),
+            func.sum(Transaction.amount).label("earned"),
+        )
+        .where(
+            Transaction.user_id == user_id,
+            Transaction.type == TransactionType.REFERRAL_BONUS,
+            Transaction.source_user_id.is_not(None),
+        )
+        .group_by(Transaction.source_user_id)
+        .subquery()
     )
-    return (await session.scalars(stmt)).all()
+
+    total = await count_referrals(session, user_id)
+    page = max(page, 1)
+    stmt = (
+        select(User, earned.c.earned)
+        .outerjoin(earned, earned.c.source_user_id == User.id)
+        .where(User.referrer_id == user_id)
+        .order_by(earned.c.earned.desc().nullslast(), User.id.desc())
+        .limit(per_page)
+        .offset((page - 1) * per_page)
+    )
+    rows = (await session.execute(stmt)).all()
+    return [
+        (user, Decimal(str(value)) if value is not None else ZERO) for user, value in rows
+    ], total
 
 
 def _search_filter(stmt: Select, query: str) -> Select:

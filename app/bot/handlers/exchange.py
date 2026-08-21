@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from decimal import Decimal
 
 from aiogram import Bot, F, Router
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import notifications, texts, ui
 from app.bot.keyboards import user as kb
-from app.bot.keyboards.callbacks import MenuCB, PairCB, QuoteCB
+from app.bot.keyboards.callbacks import MenuCB, PairCB, PairsCB, QuoteCB
 from app.bot.states import ExchangeSG, ReferralSG
 from app.config import Settings
 from app.db.models import User
@@ -26,13 +27,21 @@ from app.utils.format import parse_amount
 logger = logging.getLogger(__name__)
 router = Router(name="exchange")
 
+PAIRS_PER_PAGE = 10
 
-async def _show_pairs(event: Message | CallbackQuery, session: AsyncSession, state: FSMContext):
+
+async def _show_pairs(
+    event: Message | CallbackQuery, session: AsyncSession, state: FSMContext, *, page: int = 1
+):
     await ui.reset_flow(state)
     pairs = await exchange_service.list_available_pairs(session)
     if not pairs:
         return await ui.show(event, state, texts.no_pairs(), kb.back_to_menu())
-    return await ui.show(event, state, texts.choose_pair(), kb.pairs(pairs))
+
+    pages = max(math.ceil(len(pairs) / PAIRS_PER_PAGE), 1)
+    page = min(max(page, 1), pages)
+    chunk = pairs[(page - 1) * PAIRS_PER_PAGE : page * PAIRS_PER_PAGE]
+    return await ui.show(event, state, texts.choose_pair(), kb.pairs(chunk, page=page, pages=pages))
 
 
 async def _ask_amount(
@@ -65,6 +74,14 @@ async def open_exchange(message: Message, session: AsyncSession, state: FSMConte
 @router.callback_query(QuoteCB.filter(F.action == "pairs"))
 async def cb_open_exchange(query: CallbackQuery, session: AsyncSession, state: FSMContext) -> None:
     await _show_pairs(query, session, state)
+    await query.answer()
+
+
+@router.callback_query(PairsCB.filter())
+async def cb_pairs_page(
+    query: CallbackQuery, callback_data: PairsCB, session: AsyncSession, state: FSMContext
+) -> None:
+    await _show_pairs(query, session, state, page=callback_data.page)
     await query.answer()
 
 

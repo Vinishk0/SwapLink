@@ -17,6 +17,12 @@ class PairCB(CallbackData, prefix="pair"):
     pair_id: int
 
 
+class PairsCB(CallbackData, prefix="pairs"):
+    """Page of the exchange direction list."""
+
+    page: int = 1
+
+
 class QuoteCB(CallbackData, prefix="quote"):
     """Actions on a calculated quote: submit | amount | pairs | code."""
 

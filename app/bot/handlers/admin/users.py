@@ -29,6 +29,7 @@ router.message.filter(IsAdmin())
 router.callback_query.filter(IsAdmin())
 
 PER_PAGE = 8
+SUBVIEW_PER_PAGE = 8
 ZERO = Decimal("0")
 
 
@@ -89,7 +90,9 @@ async def render_card(
     """Client card. `order_id` links balance write-offs to a specific deal."""
     summary = await referrals_service.get_summary(session, target, settings)
     await ui.reset_flow(state)
-    await state.update_data(target_user_id=target.id, page=page, ctx_order_id=order_id)
+    await state.update_data(
+        target_user_id=target.id, page=page, list_page=page, ctx_order_id=order_id
+    )
     await ui.show(
         event,
         state,
@@ -370,12 +373,19 @@ async def cb_history(
     if target is None:
         await query.answer("Пользователь не найден.", show_alert=True)
         return
-    transactions = await balance_service.list_transactions(session, target.id, limit=15)
+    data = await state.get_data()
+    list_page = int(data.get("list_page", 1))
+    total = await balance_service.count_transactions(session, target.id)
+    pages = max(math.ceil(total / SUBVIEW_PER_PAGE), 1)
+    page = min(max(callback_data.page, 1), pages)
+    transactions = await balance_service.list_transactions(
+        session, target.id, limit=SUBVIEW_PER_PAGE, offset=(page - 1) * SUBVIEW_PER_PAGE
+    )
     await ui.show(
         query,
         state,
-        texts.history(transactions, settings),
-        kb.back_to_user(target.id, page=callback_data.page),
+        texts.history(transactions, settings, total=total),
+        kb.user_history(target.id, list_page=list_page, page=page, pages=pages),
     )
     await query.answer()
 
@@ -392,12 +402,20 @@ async def cb_referrals(
     if target is None:
         await query.answer("Пользователь не найден.", show_alert=True)
         return
-    referrals = await users_service.list_referrals(session, target.id, limit=30)
+    data = await state.get_data()
+    list_page = int(data.get("list_page", 1))
+    rows, total = await users_service.list_referrals_page(
+        session, target.id, page=callback_data.page, per_page=SUBVIEW_PER_PAGE
+    )
+    pages = max(math.ceil(total / SUBVIEW_PER_PAGE), 1)
+    page = min(max(callback_data.page, 1), pages)
     await ui.show(
         query,
         state,
-        texts.referrals_list(referrals, settings),
-        kb.back_to_user(target.id, page=callback_data.page),
+        texts.referrals_list(
+            rows, settings, total=total, page=page, per_page=SUBVIEW_PER_PAGE, owner=target
+        ),
+        kb.user_referrals(target.id, list_page=list_page, page=page, pages=pages),
     )
     await query.answer()
 

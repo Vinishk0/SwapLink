@@ -6,6 +6,7 @@ them, and the bot adds nothing on top.
 
 from __future__ import annotations
 
+import math
 from decimal import Decimal
 
 from aiogram import F, Router
@@ -28,33 +29,41 @@ router.message.filter(IsAdmin())
 router.callback_query.filter(IsAdmin())
 
 ZERO = Decimal("0")
+PER_PAGE = 10
 
 
 async def _show_currencies(
-    event: Message | CallbackQuery, session: AsyncSession, state: FSMContext
+    event: Message | CallbackQuery, session: AsyncSession, state: FSMContext, *, page: int = 1
 ) -> None:
     await ui.reset_flow(state)
     currencies = await exchange_service.list_currencies(session)
+    pages = max(math.ceil(len(currencies) / PER_PAGE), 1)
+    page = min(max(page, 1), pages)
+    chunk = currencies[(page - 1) * PER_PAGE : page * PER_PAGE]
     await ui.show(
         event,
         state,
-        "🪙 <b>Валюты</b>\n"
+        f"🪙 <b>Валюты</b> · всего: {len(currencies)}\n"
         "Курс указывается к базовой валюте — из него считаются кросс-курсы "
         "и объём сделки для реферальных начислений.",
-        kb.currencies_list(currencies),
+        kb.currencies_list(chunk, page=page, pages=pages),
     )
 
 
 async def _show_pairs(
-    event: Message | CallbackQuery, session: AsyncSession, state: FSMContext
+    event: Message | CallbackQuery, session: AsyncSession, state: FSMContext, *, page: int = 1
 ) -> None:
     await ui.reset_flow(state)
     pairs = await exchange_service.list_pairs(session)
+    pages = max(math.ceil(len(pairs) / PER_PAGE), 1)
+    page = min(max(page, 1), pages)
+    chunk = pairs[(page - 1) * PER_PAGE : page * PER_PAGE]
     await ui.show(
         event,
         state,
-        "🔁 <b>Направления обмена</b>\nВыберите направление, чтобы изменить курс или лимиты.",
-        kb.pairs_list(pairs),
+        f"🔁 <b>Направления обмена</b> · всего: {len(pairs)}\n"
+        "Выберите направление, чтобы изменить курс или лимиты.",
+        kb.pairs_list(chunk, page=page, pages=pages),
     )
 
 
@@ -82,14 +91,18 @@ async def cb_rates(query: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.callback_query(AdminRateCB.filter(F.action == "currencies"))
-async def cb_currencies(query: CallbackQuery, session: AsyncSession, state: FSMContext) -> None:
-    await _show_currencies(query, session, state)
+async def cb_currencies(
+    query: CallbackQuery, callback_data: AdminRateCB, session: AsyncSession, state: FSMContext
+) -> None:
+    await _show_currencies(query, session, state, page=callback_data.page)
     await query.answer()
 
 
 @router.callback_query(AdminRateCB.filter(F.action == "pairs"))
-async def cb_pairs(query: CallbackQuery, session: AsyncSession, state: FSMContext) -> None:
-    await _show_pairs(query, session, state)
+async def cb_pairs(
+    query: CallbackQuery, callback_data: AdminRateCB, session: AsyncSession, state: FSMContext
+) -> None:
+    await _show_pairs(query, session, state, page=callback_data.page)
     await query.answer()
 
 

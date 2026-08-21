@@ -327,32 +327,53 @@ def ref_code_applied(referrer: User, settings: Settings) -> str:
     )
 
 
-def referrals_list(users: Sequence[User], settings: Settings) -> str:
-    if not users:
+def referrals_list(
+    rows: Sequence[tuple[User, Decimal]],
+    settings: Settings,
+    *,
+    total: int = 0,
+    page: int = 1,
+    per_page: int = 8,
+    owner: User | None = None,
+) -> str:
+    """One page of referrals with what each of them earned for the inviter."""
+    if not rows:
+        if total:
+            return f"👥 На этой странице пусто — всего рефералов: {total}."
+        who = "У этого пользователя" if owner is not None else "У вас"
         return (
-            "👥 У вас пока нет рефералов.\n\n"
+            f"👥 {who} пока нет рефералов.\n\n"
             "Поделитесь ссылкой из личного кабинета — и начисления пойдут "
             "с каждой сделки приглашённых."
         )
-    lines = ["👥 <b>Ваши рефералы</b>", SEP]
-    for index, user in enumerate(users, start=1):
+
+    base = settings.base_currency
+    earned_total = sum((earned for _, earned in rows), ZERO)
+    start = (max(page, 1) - 1) * per_page
+    lines = [f"👥 <b>Рефералы</b> · всего: {total}", SEP]
+    for index, (user, earned) in enumerate(rows, start=start + 1):
         lines.append(
-            f"{index}. {user.mention} · сделок: <b>{user.deals_count}</b> · "
-            f"с {format_dt(user.referred_at)}"
+            f"{index}. {user.mention} — сделок: <b>{user.deals_count}</b>, "
+            f"заработано: <b>{format_money(earned, 4)} {base}</b>"
         )
     lines += [
         SEP,
-        f"С каждой их сделки вы получаете {format_percent(settings.referral_bonus_percent)} "
-        f"в {settings.base_currency}.",
+        f"На этой странице: <b>{format_money(earned_total, 4)} {base}</b> · "
+        f"начисление {format_percent(settings.referral_bonus_percent)} с каждой сделки.",
     ]
     return "\n".join(lines)
 
 
-def history(transactions: Sequence[Transaction], settings: Settings) -> str:
+def history(transactions: Sequence[Transaction], settings: Settings, *, total: int = 0) -> str:
     if not transactions:
+        if total:
+            return f"💸 На этой странице пусто — всего операций: {total}."
         return "💸 Операций по балансу пока не было."
     base = settings.base_currency
-    lines = ["💸 <b>История операций</b>", SEP]
+    header = "💸 <b>История операций</b>"
+    if total:
+        header += f" · всего: {total}"
+    lines = [header, SEP]
     for tx in transactions:
         sign = "+" if tx.amount > ZERO else ""
         who = f" · от {escape(tx.source_user.full_name)}" if tx.source_user is not None else ""

@@ -12,7 +12,16 @@ from collections.abc import Sequence
 from aiogram.types import CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from app.bot.keyboards.callbacks import AdminCB, MenuCB, NoopCB, OrderCB, PairCB, ProfileCB, QuoteCB
+from app.bot.keyboards.callbacks import (
+    AdminCB,
+    MenuCB,
+    NoopCB,
+    OrderCB,
+    PairCB,
+    PairsCB,
+    ProfileCB,
+    QuoteCB,
+)
 from app.db.models import Order, Pair
 
 
@@ -35,11 +44,13 @@ def back_to_menu(text: str = "⬅️ Меню") -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def pairs(pairs_list: Sequence[Pair]) -> InlineKeyboardMarkup:
+def pairs(pairs_list: Sequence[Pair], *, page: int = 1, pages: int = 1) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for pair in pairs_list:
         builder.button(text=pair.title, callback_data=PairCB(pair_id=pair.id))
     builder.adjust(2)
+    if pages > 1:
+        builder.row(*_pager(PairsCB, page=page, pages=pages))
     builder.row(InlineKeyboardButton(text="⬅️ Меню", callback_data=MenuCB(action="main").pack()))
     return builder.as_markup()
 
@@ -133,6 +144,17 @@ def referral(*, ref_link: str, share_url: str, can_enter_code: bool) -> InlineKe
     return builder.as_markup()
 
 
+def referrals(*, page: int, pages: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if pages > 1:
+        builder.row(*_pager(ProfileCB, page=page, pages=pages, action="referrals"))
+    builder.row(
+        InlineKeyboardButton(text="⬅️ Кабинет", callback_data=ProfileCB(action="refresh").pack()),
+        InlineKeyboardButton(text="🏠 Меню", callback_data=MenuCB(action="main").pack()),
+    )
+    return builder.as_markup()
+
+
 def back_to_profile() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="⬅️ Кабинет", callback_data=ProfileCB(action="refresh"))
@@ -158,18 +180,14 @@ def cancel_input(target: str = "main") -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def _pager(factory, *, page: int, pages: int, action: str, **extra) -> list[InlineKeyboardButton]:
-    """Prev / counter / next row shared by paginated lists."""
+def _pager(factory, *, page: int, pages: int, **extra) -> list[InlineKeyboardButton]:
+    """Prev / counter / next row shared by every paginated list."""
     pages = max(pages, 1)
     page = min(max(page, 1), pages)
     prev_page = page - 1 if page > 1 else pages
     next_page = page + 1 if page < pages else 1
     return [
-        InlineKeyboardButton(
-            text="◀️", callback_data=factory(action=action, page=prev_page, **extra).pack()
-        ),
+        InlineKeyboardButton(text="◀️", callback_data=factory(page=prev_page, **extra).pack()),
         InlineKeyboardButton(text=f"{page}/{pages}", callback_data=NoopCB().pack()),
-        InlineKeyboardButton(
-            text="▶️", callback_data=factory(action=action, page=next_page, **extra).pack()
-        ),
+        InlineKeyboardButton(text="▶️", callback_data=factory(page=next_page, **extra).pack()),
     ]

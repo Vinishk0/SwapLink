@@ -78,12 +78,13 @@ def user_card(user: User, *, page: int = 1, order_id: int = 0) -> InlineKeyboard
     builder.button(
         text="✏️ Баланс ±", callback_data=AdminUserCB(action="adjust", user_id=user.id, page=page)
     )
+    # `page` here is the page of the sub-view, not of the user list — the list
+    # page is remembered in the FSM.
     builder.button(
-        text="📜 История", callback_data=AdminUserCB(action="history", user_id=user.id, page=page)
+        text="📜 История", callback_data=AdminUserCB(action="history", user_id=user.id, page=1)
     )
     builder.button(
-        text="👥 Рефералы",
-        callback_data=AdminUserCB(action="referrals", user_id=user.id, page=page),
+        text="👥 Рефералы", callback_data=AdminUserCB(action="referrals", user_id=user.id, page=1)
     )
     builder.button(
         text="📋 Заявки",
@@ -101,6 +102,30 @@ def user_card(user: User, *, page: int = 1, order_id: int = 0) -> InlineKeyboard
     else:
         builder.button(text="⬅️ К списку", callback_data=AdminUserCB(action="list", page=page))
     builder.adjust(2, 2, 2, 1, 1)
+    return builder.as_markup()
+
+
+def user_history(user_id: int, *, list_page: int, page: int, pages: int) -> InlineKeyboardMarkup:
+    return _user_subview(user_id, action="history", list_page=list_page, page=page, pages=pages)
+
+
+def user_referrals(user_id: int, *, list_page: int, page: int, pages: int) -> InlineKeyboardMarkup:
+    return _user_subview(user_id, action="referrals", list_page=list_page, page=page, pages=pages)
+
+
+def _user_subview(
+    user_id: int, *, action: str, list_page: int, page: int, pages: int
+) -> InlineKeyboardMarkup:
+    """Paginated list attached to a user card (history, referrals)."""
+    builder = InlineKeyboardBuilder()
+    if pages > 1:
+        builder.row(*_pager(AdminUserCB, action=action, user_id=user_id, page=page, pages=pages))
+    builder.row(
+        InlineKeyboardButton(
+            text="⬅️ К человеку",
+            callback_data=AdminUserCB(action="open", user_id=user_id, page=list_page).pack(),
+        )
+    )
     return builder.as_markup()
 
 
@@ -228,7 +253,9 @@ def rates_menu() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def currencies_list(currencies: Sequence[Currency]) -> InlineKeyboardMarkup:
+def currencies_list(
+    currencies: Sequence[Currency], *, page: int = 1, pages: int = 1
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for currency in currencies:
         mark = "" if currency.is_active else "⛔️ "
@@ -238,6 +265,8 @@ def currencies_list(currencies: Sequence[Currency]) -> InlineKeyboardMarkup:
                 callback_data=AdminRateCB(action="cur_open", currency_id=currency.id).pack(),
             )
         )
+    if pages > 1:
+        builder.row(*_pager(AdminRateCB, action="currencies", page=page, pages=pages))
     builder.row(
         InlineKeyboardButton(text="➕ Валюта", callback_data=AdminRateCB(action="cur_add").pack()),
         InlineKeyboardButton(text="⬅️ Назад", callback_data=AdminCB(section="rates").pack()),
@@ -262,7 +291,7 @@ def currency_card(currency: Currency) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def pairs_list(pairs: Sequence[Pair]) -> InlineKeyboardMarkup:
+def pairs_list(pairs: Sequence[Pair], *, page: int = 1, pages: int = 1) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for pair in pairs:
         mark = "" if pair.is_active else "⛔️ "
@@ -272,6 +301,8 @@ def pairs_list(pairs: Sequence[Pair]) -> InlineKeyboardMarkup:
                 callback_data=AdminRateCB(action="pair_open", pair_id=pair.id).pack(),
             )
         )
+    if pages > 1:
+        builder.row(*_pager(AdminRateCB, action="pairs", page=page, pages=pages))
     builder.row(
         InlineKeyboardButton(
             text="➕ Направление", callback_data=AdminRateCB(action="pair_add").pack()
@@ -327,17 +358,13 @@ def confirm_delete(scope: str, object_id: int, *, back: AdminRateCB) -> InlineKe
     return builder.as_markup()
 
 
-def _pager(factory, *, action: str, page: int, pages: int, **extra) -> list[InlineKeyboardButton]:
+def _pager(factory, *, page: int, pages: int, **extra) -> list[InlineKeyboardButton]:
     pages = max(pages, 1)
     page = min(max(page, 1), pages)
     prev_page = page - 1 if page > 1 else pages
     next_page = page + 1 if page < pages else 1
     return [
-        InlineKeyboardButton(
-            text="◀️", callback_data=factory(action=action, page=prev_page, **extra).pack()
-        ),
+        InlineKeyboardButton(text="◀️", callback_data=factory(page=prev_page, **extra).pack()),
         InlineKeyboardButton(text=f"{page}/{pages}", callback_data=NoopCB().pack()),
-        InlineKeyboardButton(
-            text="▶️", callback_data=factory(action=action, page=next_page, **extra).pack()
-        ),
+        InlineKeyboardButton(text="▶️", callback_data=factory(page=next_page, **extra).pack()),
     ]
