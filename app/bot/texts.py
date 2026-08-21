@@ -1,4 +1,8 @@
-"""All user-facing copy in one place (HTML parse mode)."""
+"""All user-facing copy in one place (HTML parse mode).
+
+There is no commission anywhere: the rate an admin sets is the final client
+rate, and the only percentage a user ever sees is their referral discount.
+"""
 
 from __future__ import annotations
 
@@ -29,6 +33,10 @@ def plural(number: int, one: str, few: str, many: str) -> str:
     return many
 
 
+def deals_word(count: int) -> str:
+    return plural(count, "сделку", "сделки", "сделок")
+
+
 # --------------------------------------------------------------------------- #
 # Onboarding
 # --------------------------------------------------------------------------- #
@@ -39,17 +47,15 @@ def greeting(user: User, settings: Settings, *, bound_to: User | None = None) ->
         f"👋 <b>Привет, {escape(user.first_name or 'друг')}!</b>",
         "",
         "Это калькулятор обмена валют с реферальной программой.",
-        "Здесь можно рассчитать сумму обмена и оставить заявку — "
-        "проводит сделку оператор, бот только считает.",
+        "Рассчитайте сумму и оставьте заявку — сделку проводит оператор, бот только считает.",
     ]
     if bound_to is not None:
+        limit = settings.referral_discount_limit
         lines += [
             "",
             f"🎁 Вы перешли по ссылке {bound_to.mention} — реферальная связь закреплена.",
-            f"Ваша скидка — <b>{format_percent(settings.referral_discount_percent)}</b> "
-            f"к комиссии на первые "
-            f"<b>{settings.referral_discount_limit} "
-            f"{plural(settings.referral_discount_limit, 'сделку', 'сделки', 'сделок')}</b>.",
+            f"Ваша скидка <b>{format_percent(settings.referral_discount_percent)}</b> "
+            f"действует на первые <b>{limit} {deals_word(limit)}</b>.",
         ]
     else:
         lines += [
@@ -58,29 +64,28 @@ def greeting(user: User, settings: Settings, *, bound_to: User | None = None) ->
             f"<b>{format_percent(settings.referral_bonus_percent)}</b> с каждой их сделки — "
             "без ограничения по времени.",
         ]
-    lines += ["", "Выберите действие в меню ниже 👇"]
+    lines += ["", "Выберите действие 👇"]
     return "\n".join(lines)
 
 
 def help_text(settings: Settings) -> str:
-    discount = format_percent(settings.referral_discount_percent)
-    bonus = format_percent(settings.referral_bonus_percent)
     limit = settings.referral_discount_limit
     lines = [
         "ℹ️ <b>Как всё устроено</b>",
         "",
         "💱 <b>Расчёт обмена</b>",
-        "Выберите направление и введите сумму — бот покажет курс, комиссию и итог. "
+        "Выберите направление и введите сумму — бот покажет курс и итог к получению. "
+        "Курс уже финальный: никаких скрытых комиссий бот не добавляет. "
         "Заявку подтверждает оператор, деньги бот не переводит.",
         "",
         "🎁 <b>Реферальная программа</b>",
-        f"• Приглашённый получает скидку <b>{discount}</b> к комиссии "
-        f"на первые <b>{limit} {plural(limit, 'сделку', 'сделки', 'сделок')}</b>.",
-        f"• Пригласивший получает <b>{bonus}</b> от объёма каждой сделки своего реферала — "
-        "постоянно, без лимита.",
+        f"• Приглашённый получает <b>{format_percent(settings.referral_discount_percent)}</b> "
+        f"сверху к сумме обмена на первые <b>{limit} {deals_word(limit)}</b>.",
+        f"• Пригласивший получает <b>{format_percent(settings.referral_bonus_percent)}</b> "
+        "от объёма каждой сделки своего реферала — постоянно, без лимита.",
         "• Реферальная связь закрепляется навсегда при первом переходе по ссылке.",
         f"• Начисления копятся на балансе в {settings.base_currency}: их можно получить "
-        "деньгами или зачесть скидкой в обмен — по согласованию с оператором.",
+        "деньгами или зачесть в обмен — по согласованию с оператором.",
         "",
         "👤 <b>Личный кабинет</b> — ваша ссылка, статистика и история начислений.",
     ]
@@ -110,13 +115,11 @@ def ask_amount(pair: Pair, *, discount_percent: Decimal, discounts_left: int) ->
         f"💱 <b>{pair.title}</b>",
         f"Курс: <b>1 {pair.from_currency.code} = "
         f"{format_money(pair.effective_rate, 6)} {pair.to_currency.code}</b>",
-        f"Комиссия обменника: <b>{format_percent(pair.commission_percent)}</b>",
     ]
     if discount_percent > ZERO:
         lines.append(
-            f"🎁 Ваша реферальная скидка: <b>−{format_percent(discount_percent)}</b> "
-            f"(осталось {discounts_left} "
-            f"{plural(discounts_left, 'сделка', 'сделки', 'сделок')})"
+            f"🎁 Ваша реферальная скидка: <b>+{format_percent(discount_percent)}</b> "
+            f"(осталось {discounts_left} {plural(discounts_left, 'сделка', 'сделки', 'сделок')})"
         )
     limits = []
     if pair.min_amount is not None:
@@ -144,20 +147,13 @@ def quote_text(quote: Quote, settings: Settings, *, discounts_left: int) -> str:
     ]
     if quote.has_discount:
         lines += [
-            f"Комиссия: <s>{format_percent(quote.base_commission_percent)}</s> "
-            f"<b>{format_percent(quote.commission_percent)}</b>",
-            f"🎁 Скидка реферала: <b>+"
-            f"{format_amount(quote.discount_amount, quote.to_code, quote.to_decimals)}</b> "
-            f"к получению",
+            f"🎁 Реферальная скидка <b>{format_percent(quote.discount_percent)}</b>: "
+            f"<b>+{format_amount(quote.discount_amount, quote.to_code, quote.to_decimals)}</b> "
+            "к получению",
             f"Осталось скидочных сделок: <b>{max(discounts_left - 1, 0)}</b> из "
             f"{settings.referral_discount_limit}",
         ]
-    else:
-        lines.append(f"Комиссия: <b>{format_percent(quote.commission_percent)}</b>")
-    lines += [
-        SEP,
-        "Расчёт справочный: финальные условия подтверждает оператор.",
-    ]
+    lines += [SEP, "Расчёт справочный: финальные условия подтверждает оператор."]
     return "\n".join(lines)
 
 
@@ -166,10 +162,33 @@ def discount_exhausted(settings: Settings) -> str:
     return (
         f"ℹ️ Вы уже использовали все <b>{limit} "
         f"{plural(limit, 'скидку', 'скидки', 'скидок')}</b> по реферальной программе — "
-        "дальше обмен идёт по стандартной комиссии.\n\n"
-        f"Но ваша ссылка продолжает работать: приглашайте друзей и получайте "
+        "дальше обмен идёт по обычному курсу.\n\n"
+        "Но ваша ссылка продолжает работать: приглашайте друзей и получайте "
         f"<b>{format_percent(settings.referral_bonus_percent)}</b> с каждой их сделки. 🎁"
     )
+
+
+def _deal_amounts(order: Order) -> list[str]:
+    """Money lines shared by every card that shows a deal."""
+    lines = [
+        f"Отдаёт: <b>{format_money(order.amount_from)} {order.from_code}</b>",
+        f"Получает: <b>{format_money(order.amount_to, order.to_decimals)} {order.to_code}</b>",
+    ]
+    if order.discount_percent > ZERO:
+        lines.append(
+            f"🎁 Скидка реферала {format_percent(order.discount_percent)}: "
+            f"+{format_money(order.discount_amount, order.to_decimals)} {order.to_code}"
+        )
+    if order.has_bonus_spent:
+        lines.append(
+            f"🎫 Зачтено с баланса: {format_money(order.bonus_spent, 4)} "
+            f"(+{format_money(order.bonus_spent_to, order.to_decimals)} {order.to_code})"
+        )
+        lines.append(
+            f"💰 Итого к выдаче: <b>{format_money(order.total_to, order.to_decimals)} "
+            f"{order.to_code}</b>"
+        )
+    return lines
 
 
 def order_created(order: Order, settings: Settings) -> str:
@@ -177,13 +196,10 @@ def order_created(order: Order, settings: Settings) -> str:
         f"✅ <b>Заявка #{order.id} создана</b>",
         SEP,
         f"Направление: <b>{order.direction}</b>",
-        f"Отдаёте: <b>{format_money(order.amount_from)} {order.from_code}</b>",
-        f"Получаете: <b>{format_money(order.amount_to)} {order.to_code}</b>",
-        f"Комиссия: <b>{format_percent(order.commission_percent)}</b>",
+        *_deal_amounts(order),
+        SEP,
+        "Оператор свяжется с вами для проведения обмена.",
     ]
-    if order.discount_percent > ZERO:
-        lines.append(f"🎁 С учётом реферальной скидки {format_percent(order.discount_percent)}")
-    lines += [SEP, "Оператор свяжется с вами для проведения обмена."]
     if settings.support_username:
         lines.append(f"💬 Связаться: @{settings.support_username}")
     return "\n".join(lines)
@@ -194,21 +210,17 @@ def order_card(order: Order) -> str:
         f"📋 <b>Заявка #{order.id}</b> · {order.status.title}",
         SEP,
         f"Направление: <b>{order.direction}</b>",
-        f"Отдаёте: <b>{format_money(order.amount_from)} {order.from_code}</b>",
-        f"Получаете: <b>{format_money(order.amount_to)} {order.to_code}</b>",
+        *_deal_amounts(order),
         f"Курс: 1 {order.from_code} = {format_money(order.rate, 6)} {order.to_code}",
-        f"Комиссия: {format_percent(order.commission_percent)}",
         f"Создана: {format_dt(order.created_at)}",
     ]
-    if order.discount_percent > ZERO:
-        lines.append(f"🎁 Реферальная скидка: {format_percent(order.discount_percent)}")
     if order.admin_comment:
         lines.append(f"💬 Комментарий оператора: {escape(order.admin_comment)}")
     return "\n".join(lines)
 
 
 def orders_empty() -> str:
-    return "📭 У вас пока нет заявок.\nНажмите «💱 Рассчитать обмен», чтобы создать первую."
+    return "📭 У вас пока нет заявок.\nНажмите «💱 Обмен», чтобы создать первую."
 
 
 def orders_list(orders: Sequence[Order]) -> str:
@@ -261,13 +273,13 @@ def profile(user: User, summary: ReferralSummary, settings: Settings, ref_link: 
             lines.append(
                 f"Ваша скидка <b>{format_percent(settings.referral_discount_percent)}</b> "
                 f"действует ещё на <b>{summary.discounts_left}</b> "
-                f"{plural(summary.discounts_left, 'сделку', 'сделки', 'сделок')} "
+                f"{deals_word(summary.discounts_left)} "
                 f"(использовано {summary.discounts_used} из {summary.discount_limit})"
             )
         else:
             lines.append(
                 f"Скидки по программе исчерпаны ({summary.discounts_used} из "
-                f"{summary.discount_limit}) — обмен по стандартной комиссии, "
+                f"{summary.discount_limit}) — обмен по обычному курсу, "
                 "но ваша ссылка продолжает приносить доход."
             )
     return "\n".join(lines)
@@ -280,12 +292,10 @@ def referral_program(summary: ReferralSummary, settings: Settings, ref_link: str
         "🎁 <b>Реферальная программа</b>",
         SEP,
         "• Друг переходит по вашей ссылке и навсегда закрепляется за вами.",
-        "• Приглашённый получает скидку "
-        f"<b>{format_percent(settings.referral_discount_percent)}</b> "
-        f"к комиссии на первые <b>{limit} "
-        f"{plural(limit, 'сделку', 'сделки', 'сделок')}</b>.",
+        f"• Приглашённый получает <b>{format_percent(settings.referral_discount_percent)}</b> "
+        f"сверху к обмену на первые <b>{limit} {deals_word(limit)}</b>.",
         f"• Вы получаете <b>{format_percent(settings.referral_bonus_percent)}</b> "
-        f"от объёма <b>каждой</b> сделки приглашённого — бессрочно.",
+        "от объёма <b>каждой</b> сделки приглашённого — бессрочно.",
         SEP,
         f"Приглашено: <b>{summary.referrals_count}</b> · "
         f"заработано: <b>{format_money(summary.total_earned, 4)} {base}</b> · "
@@ -302,8 +312,7 @@ def referral_program(summary: ReferralSummary, settings: Settings, ref_link: str
 def ask_ref_code() -> str:
     return (
         "🎟 <b>Ввод реферального кода</b>\n\n"
-        "Пришлите реферальную ссылку или код друга — например "
-        "<code>ABCD2345</code>.\n\n"
+        "Пришлите реферальную ссылку или код друга — например <code>ABCD2345</code>.\n\n"
         "⚠️ Сделать это можно только <b>до первой проведённой сделки</b>, "
         "и сменить реферера потом нельзя."
     )
@@ -313,9 +322,8 @@ def ref_code_applied(referrer: User, settings: Settings) -> str:
     limit = settings.referral_discount_limit
     return (
         f"✅ Готово! Теперь вы реферал {referrer.mention}.\n\n"
-        f"🎁 Скидка <b>{format_percent(settings.referral_discount_percent)}</b> к комиссии "
-        f"действует на первые <b>{limit} "
-        f"{plural(limit, 'сделку', 'сделки', 'сделок')}</b>."
+        f"🎁 Скидка <b>{format_percent(settings.referral_discount_percent)}</b> "
+        f"действует на первые <b>{limit} {deals_word(limit)}</b>."
     )
 
 
@@ -347,13 +355,10 @@ def history(transactions: Sequence[Transaction], settings: Settings) -> str:
     lines = ["💸 <b>История операций</b>", SEP]
     for tx in transactions:
         sign = "+" if tx.amount > ZERO else ""
-        title = tx.type.title
-        who = ""
-        if tx.source_user is not None:
-            who = f" · от {escape(tx.source_user.full_name)}"
+        who = f" · от {escape(tx.source_user.full_name)}" if tx.source_user is not None else ""
         lines.append(
             f"{format_dt(tx.created_at)} · <b>{sign}{format_money(tx.amount, 4)} {base}</b> · "
-            f"{title}{who}"
+            f"{tx.type.title}{who}"
         )
     return "\n".join(lines)
 
@@ -368,14 +373,8 @@ def notify_order_confirmed(order: Order, settings: Settings) -> str:
         f"✅ <b>Заявка #{order.id} проведена</b>",
         SEP,
         f"{order.direction}",
-        f"Отдано: <b>{format_money(order.amount_from)} {order.from_code}</b>",
-        f"Получено: <b>{format_money(order.amount_to)} {order.to_code}</b>",
+        *_deal_amounts(order),
     ]
-    if order.discount_applied:
-        lines.append(
-            f"🎁 Реферальная скидка {format_percent(order.discount_percent)} применена "
-            f"(+{format_money(order.discount_amount)} {order.to_code})"
-        )
     if order.admin_comment:
         lines.append(f"💬 {escape(order.admin_comment)}")
     lines += ["", "Спасибо, что выбрали нас!"]
@@ -386,8 +385,8 @@ def notify_discount_limit_reached(settings: Settings) -> str:
     limit = settings.referral_discount_limit
     return (
         f"ℹ️ Это была ваша <b>{limit}-я</b> сделка со скидкой. "
-        "Следующие обмены пройдут по стандартной комиссии.\n\n"
-        f"Ваша реферальная ссылка продолжает работать: "
+        "Следующие обмены пройдут по обычному курсу.\n\n"
+        "Ваша реферальная ссылка продолжает работать: "
         f"{format_percent(settings.referral_bonus_percent)} с каждой сделки приглашённых. 🎁"
     )
 
@@ -405,7 +404,7 @@ def notify_referral_bonus(
 ) -> str:
     base = settings.base_currency
     return (
-        f"🎉 <b>Начисление по реферальной программе</b>\n"
+        "🎉 <b>Начисление по реферальной программе</b>\n"
         f"{SEP}\n"
         f"Ваш реферал {referral.mention} провёл обмен {order.direction}.\n"
         f"Начислено: <b>+{format_money(amount, 4)} {base}</b>\n"
@@ -432,7 +431,7 @@ def notify_discount_granted(
 ) -> str:
     base = settings.base_currency
     lines = [
-        "🎫 <b>Бонусы зачтены в скидку на обмен</b>",
+        "🎫 <b>Бонусы зачтены в обмен</b>",
         f"Списано с баланса: <b>{format_money(amount, 4)} {base}</b>",
         f"Остаток: <b>{format_money(balance, 4)} {base}</b>",
     ]
@@ -453,29 +452,6 @@ def notify_adjustment(
     ]
     if comment:
         lines.append(f"💬 {escape(comment)}")
-    return "\n".join(lines)
-
-
-def notify_admin_new_order(order: Order, user: User, settings: Settings) -> str:
-    base = settings.base_currency
-    lines = [
-        f"🔔 <b>Новая заявка #{order.id}</b>",
-        SEP,
-        f"Клиент: {user.mention} (<code>{user.tg_id}</code>)",
-        f"Направление: <b>{order.direction}</b>",
-        f"Отдаёт: <b>{format_money(order.amount_from)} {order.from_code}</b>",
-        f"Получает: <b>{format_money(order.amount_to)} {order.to_code}</b>",
-        f"Курс: {format_money(order.rate, 6)} · комиссия "
-        f"{format_percent(order.commission_percent)}",
-        f"Объём: {format_money(order.volume_base, 2)} {base}",
-    ]
-    if order.discount_percent > ZERO:
-        lines.append(f"🎁 Скидка реферала: {format_percent(order.discount_percent)}")
-    if order.referrer is not None:
-        lines.append(
-            f"🤝 Реферер: {order.referrer.mention} · бонус "
-            f"{format_money(order.bonus_amount, 4)} {base}"
-        )
     return "\n".join(lines)
 
 
@@ -569,26 +545,23 @@ def admin_user_card(
     return "\n".join(lines)
 
 
-def admin_order_card(order: Order, settings: Settings) -> str:
+def admin_order_card(order: Order, settings: Settings, *, is_new: bool = False) -> str:
     base = settings.base_currency
+    header = (
+        f"🔔 <b>Новая заявка #{order.id}</b>"
+        if is_new
+        else f"📋 <b>Заявка #{order.id}</b> · {order.status.title}"
+    )
     lines = [
-        f"📋 <b>Заявка #{order.id}</b> · {order.status.title}",
+        header,
         SEP,
         f"Клиент: {order.user.mention} (<code>{order.user.tg_id}</code>)",
         f"Направление: <b>{order.direction}</b>",
-        f"Отдаёт: <b>{format_money(order.amount_from)} {order.from_code}</b>",
-        f"Получает: <b>{format_money(order.amount_to)} {order.to_code}</b>",
+        *_deal_amounts(order),
         f"Курс: 1 {order.from_code} = {format_money(order.rate, 6)} {order.to_code}",
-        f"Комиссия: <b>{format_percent(order.commission_percent)}</b> "
-        f"(базовая {format_percent(order.base_commission_percent)})",
         f"Объём: <b>{format_money(order.volume_base, 2)} {base}</b>",
         f"Создана: {format_dt(order.created_at)}",
     ]
-    if order.discount_percent > ZERO:
-        lines.append(
-            f"🎁 Скидка реферала: {format_percent(order.discount_percent)} "
-            f"(+{format_money(order.discount_amount)} {order.to_code})"
-        )
     if order.referrer is not None:
         lines.append(
             f"🤝 Реферер: {order.referrer.mention} · бонус "
@@ -616,18 +589,19 @@ def admin_currency_card(currency: Currency, settings: Settings) -> str:
 
 def admin_pair_card(pair: Pair, settings: Settings) -> str:
     rate_source = "задан вручную" if pair.is_manual_rate else "авто (из курсов валют)"
-    discounted_commission = max(pair.commission_percent - settings.referral_discount_percent, ZERO)
-    lines = [
-        f"🔁 <b>{pair.title}</b>",
-        SEP,
-        f"Курс: <b>1 {pair.from_currency.code} = "
-        f"{format_money(pair.effective_rate, 8)} {pair.to_currency.code}</b> ({rate_source})",
-        f"Комиссия: <b>{format_percent(pair.commission_percent)}</b>",
-        f"Лимиты: {format_money(pair.min_amount) if pair.min_amount else '—'} … "
-        f"{format_money(pair.max_amount) if pair.max_amount else '—'} "
-        f"{pair.from_currency.code}",
-        f"Статус: {'✅ активно' if pair.is_active else '⛔️ выключено'}",
-        "",
-        f"С учётом реферальной скидки комиссия составит {format_percent(discounted_commission)}.",
-    ]
-    return "\n".join(lines)
+    return "\n".join(
+        [
+            f"🔁 <b>{pair.title}</b>",
+            SEP,
+            f"Курс: <b>1 {pair.from_currency.code} = "
+            f"{format_money(pair.effective_rate, 8)} {pair.to_currency.code}</b> ({rate_source})",
+            f"Лимиты: {format_money(pair.min_amount) if pair.min_amount else '—'} … "
+            f"{format_money(pair.max_amount) if pair.max_amount else '—'} "
+            f"{pair.from_currency.code}",
+            f"Статус: {'✅ активно' if pair.is_active else '⛔️ выключено'}",
+            "",
+            "Курс указывается финальный, с вашей маржой — бот комиссию не добавляет. "
+            f"Рефералам начисляется {format_percent(settings.referral_discount_percent)} "
+            "сверху к сумме.",
+        ]
+    )

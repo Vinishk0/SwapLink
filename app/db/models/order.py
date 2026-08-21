@@ -8,6 +8,7 @@ only event that consumes a referral discount and credits the inviter.
 from __future__ import annotations
 
 import enum
+import json
 from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -61,17 +62,23 @@ class Order(TimestampMixin, Base):
     # Snapshot of the direction: pairs may be renamed or removed later.
     from_code: Mapped[str] = mapped_column(String(16), nullable=False)
     to_code: Mapped[str] = mapped_column(String(16), nullable=False)
+    to_decimals: Mapped[int] = mapped_column(default=2, server_default="2")
 
     amount_from: Mapped[Decimal] = mapped_column(nullable=False)
+    #: What the client receives, discount included.
     amount_to: Mapped[Decimal] = mapped_column(nullable=False)
     rate: Mapped[Decimal] = mapped_column(nullable=False)
 
-    base_commission_percent: Mapped[Decimal] = mapped_column(nullable=False)
+    #: Referral discount: a bonus on top of the rate, in percent.
     discount_percent: Mapped[Decimal] = mapped_column(default=ZERO, server_default="0")
-    commission_percent: Mapped[Decimal] = mapped_column(nullable=False)
-    #: How much the user saved thanks to the discount, in the target currency.
+    #: What the discount added, in the target currency.
     discount_amount: Mapped[Decimal] = mapped_column(default=ZERO, server_default="0")
     discount_applied: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+
+    #: Referral balance an admin wrote off into this deal (accounting currency)…
+    bonus_spent: Mapped[Decimal] = mapped_column(default=ZERO, server_default="0")
+    #: …and the same amount converted to the target currency at write-off time.
+    bonus_spent_to: Mapped[Decimal] = mapped_column(default=ZERO, server_default="0")
 
     #: Deal volume converted to the accounting currency — the bonus base.
     volume_base: Mapped[Decimal] = mapped_column(default=ZERO, server_default="0")
@@ -91,6 +98,11 @@ class Order(TimestampMixin, Base):
     admin_comment: Mapped[str | None] = mapped_column(Text)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    #: Where the "new order" cards live: JSON list of [chat_id, message_id].
+    #: They are the one kind of bot message that outlives the single-screen UI —
+    #: until the order is confirmed or rejected and they get deleted.
+    admin_messages: Mapped[str | None] = mapped_column(Text)
+
     user: Mapped[User] = relationship(
         foreign_keys=[user_id], back_populates="orders", lazy="selectin"
     )
@@ -104,3 +116,30 @@ class Order(TimestampMixin, Base):
     @property
     def direction(self) -> str:
         return f"{self.from_code} → {self.to_code}"
+
+    @property
+    def total_to(self) -> Decimal:
+        """Everything the client walks away with, bonuses included."""
+        return self.amount_to + self.bonus_spent_to
+
+    @property
+    def has_bonus_spent(self) -> bool:
+        return self.bonus_spent > ZERO
+
+    # --- admin notification bookkeeping ---
+
+    @property
+    def admin_message_refs(self) -> list[tuple[int, int]]:
+        if not self.admin_messages:
+            return []
+        try:
+            return [(int(chat), int(message)) for chat, message in json.loads(self.admin_messages)]
+        except (ValueError, TypeError):  # pragma: no cover - corrupted payload
+            return []
+
+    @admin_message_refs.setter
+    def admin_message_refs(self, refs: list[tuple[int, int]]) -> None:
+        self.admin_messages = json.dumps([[chat, message] for chat, message in refs])
+
+    def add_admin_message(self, chat_id: int, message_id: int) -> None:
+        self.admin_message_refs = [*self.admin_message_refs, (chat_id, message_id)]

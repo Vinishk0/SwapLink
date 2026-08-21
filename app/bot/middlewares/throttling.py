@@ -26,6 +26,9 @@ class ThrottlingMiddleware(BaseMiddleware):
         if tg_user is None:
             return await handler(event, data)
 
+        if self.min_interval <= 0:
+            return await handler(event, data)
+
         now = time.monotonic()
         if now - self._last_seen[tg_user.id] < self.min_interval:
             await self._silence(event)

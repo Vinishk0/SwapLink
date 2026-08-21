@@ -35,7 +35,5 @@ class AdminRateSG(StatesGroup):
     currency_name = State()
     currency_rate = State()
     currency_edit_rate = State()
-    pair_commission = State()
     pair_rate = State()
     pair_limits = State()
-    pair_new_commission = State()

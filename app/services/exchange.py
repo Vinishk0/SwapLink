@@ -1,8 +1,9 @@
 """Rate maintenance and the exchange calculator.
 
-The bot never executes a deal: `calculate_quote` is the single source of truth
-for what a user would get, how much the referral discount saved them and how
-large the bonus of the inviter would be.
+The bot never executes a deal and never adds a commission of its own: the rate
+an administrator sets is the final client rate. `calculate_quote` is the single
+source of truth for what a user gets, how much the referral discount added and
+how large the bonus of the inviter would be.
 """
 
 from __future__ import annotations
@@ -36,11 +37,11 @@ class Quote:
     to_decimals: int
     amount_from: Decimal
     rate: Decimal
-    gross_to: Decimal
+    #: What the client would get at the plain rate, before the referral discount.
+    base_to: Decimal
+    #: What the client actually gets — `base_to` plus the discount.
     amount_to: Decimal
-    base_commission_percent: Decimal
     discount_percent: Decimal
-    commission_percent: Decimal
     discount_amount: Decimal
     volume_base: Decimal
     bonus_amount: Decimal
@@ -57,10 +58,10 @@ def calculate_quote(
     discount_percent: Decimal = ZERO,
     bonus_percent: Decimal = ZERO,
 ) -> Quote:
-    """Convert `amount_from` through `pair`, applying the referral discount.
+    """Convert `amount_from` through `pair`, adding the referral discount.
 
-    The discount reduces the exchange commission (never below zero), so a 2%
-    commission with a 0.5% discount leaves the user paying 1.5%.
+    The discount is a bonus on top of the rate: with 0.5% a referral receives
+    0.5% more of the target currency than the published rate gives.
     """
     if amount_from <= ZERO:
         raise RateError("Сумма обмена должна быть больше нуля.")
@@ -69,13 +70,10 @@ def calculate_quote(
     if rate <= ZERO:
         raise RateError(f"Для направления {pair.title} не задан корректный курс.")
 
-    base_commission = max(pair.commission_percent, ZERO)
-    discount = min(max(discount_percent, ZERO), base_commission)
-    effective_commission = base_commission - discount
-
-    gross_to = amount_from * rate
-    amount_to = gross_to * (HUNDRED - effective_commission) / HUNDRED
-    discount_amount = gross_to * discount / HUNDRED
+    discount = max(discount_percent, ZERO)
+    base_to = amount_from * rate
+    discount_amount = base_to * discount / HUNDRED
+    amount_to = base_to + discount_amount
 
     volume_base = amount_from * pair.from_currency.rate_to_base
     bonus_amount = volume_base * bonus_percent / HUNDRED
@@ -89,11 +87,9 @@ def calculate_quote(
         to_decimals=to_decimals,
         amount_from=amount_from,
         rate=rate,
-        gross_to=quantize(gross_to, to_decimals),
+        base_to=quantize(base_to, to_decimals),
         amount_to=quantize(amount_to, to_decimals),
-        base_commission_percent=base_commission,
         discount_percent=discount,
-        commission_percent=effective_commission,
         discount_amount=quantize(discount_amount, to_decimals),
         volume_base=quantize(volume_base, BONUS_DECIMALS),
         bonus_amount=quantize(bonus_amount, BONUS_DECIMALS),
@@ -210,7 +206,6 @@ async def create_pair(
     *,
     from_currency: Currency,
     to_currency: Currency,
-    commission_percent: Decimal,
     rate: Decimal | None = None,
 ) -> Pair:
     if from_currency.id == to_currency.id:
@@ -226,7 +221,6 @@ async def create_pair(
     pair = Pair(
         from_currency_id=from_currency.id,
         to_currency_id=to_currency.id,
-        commission_percent=commission_percent,
         rate=rate,
     )
     session.add(pair)
@@ -240,7 +234,6 @@ async def update_pair(
     pair: Pair,
     *,
     rate: Decimal | type[Ellipsis] | None = ...,
-    commission_percent: Decimal | None = None,
     min_amount: Decimal | type[Ellipsis] | None = ...,
     max_amount: Decimal | type[Ellipsis] | None = ...,
 ) -> Pair:
@@ -249,10 +242,6 @@ async def update_pair(
         if rate is not None and rate <= ZERO:
             raise RateError("Курс должен быть больше нуля.")
         pair.rate = rate  # type: ignore[assignment]
-    if commission_percent is not None:
-        if commission_percent < ZERO or commission_percent >= HUNDRED:
-            raise RateError("Комиссия должна быть в диапазоне от 0 до 100%.")
-        pair.commission_percent = commission_percent
     if min_amount is not ...:
         pair.min_amount = min_amount  # type: ignore[assignment]
     if max_amount is not ...:

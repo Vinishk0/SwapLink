@@ -37,7 +37,7 @@ async def test_plain_order_has_no_discount_and_no_bonus(
     assert order.status is OrderStatus.PENDING
     assert order.discount_percent == Decimal("0")
     assert order.bonus_amount == Decimal("0")
-    assert order.amount_to == Decimal("9800.00")
+    assert order.amount_to == Decimal("10000.00")
 
 
 async def test_referral_gets_the_discount_and_the_inviter_gets_paid(
@@ -51,8 +51,9 @@ async def test_referral_gets_the_discount_and_the_inviter_gets_paid(
 
     assert order.status is OrderStatus.CONFIRMED
     assert order.discount_applied is True
-    assert order.commission_percent == Decimal("1.5")
-    assert order.amount_to == Decimal("9850.00")
+    assert order.discount_percent == Decimal("0.5")
+    # 10 000 RUB at the plain rate + 0.5% for the referral
+    assert order.amount_to == Decimal("10050.00")
 
     # 0.5% of a 100 USDT volume
     assert order.bonus_amount == Decimal("0.5")
@@ -83,7 +84,7 @@ async def test_discount_stops_after_three_deals_but_bonus_continues(
 
     assert fourth.order.discount_applied is False
     assert fourth.order.discount_percent == Decimal("0")
-    assert fourth.order.commission_percent == Decimal("2")
+    assert fourth.order.amount_to == Decimal("10000.00")
     # The inviter still earns from the fourth deal
     assert fourth.order.bonus_amount == Decimal("0.5")
     assert inviter.total_earned == Decimal("2.0")
@@ -110,7 +111,7 @@ async def test_discount_is_revoked_when_the_limit_is_hit_between_request_and_con
 
     assert result.discount_revoked is True
     assert result.order.discount_applied is False
-    assert result.order.amount_to == Decimal("9800.00")
+    assert result.order.amount_to == Decimal("10000.00")
 
 
 async def test_operator_can_correct_the_amount(
@@ -219,3 +220,39 @@ async def test_blocked_user_cannot_create_orders(
         await orders_service.create_order(
             session, user=user, pair=pair, amount_from=Decimal("100"), settings=settings
         )
+
+
+async def test_bonus_write_off_is_shown_on_the_deal(
+    session: AsyncSession, make_user, pair: Pair, settings: Settings
+) -> None:
+    """An admin spending a client's balance must change what the deal pays out."""
+    client = await make_user(1)
+    order = await orders_service.create_order(
+        session, user=client, pair=pair, amount_from=Decimal("100"), settings=settings
+    )
+    assert order.total_to == order.amount_to
+
+    # 5 USDT of balance, RUB is 0.01 of the base -> +500 RUB for the client
+    await orders_service.apply_bonus_write_off(session, order, amount_base=Decimal("5"))
+
+    assert order.bonus_spent == Decimal("5")
+    assert order.bonus_spent_to == Decimal("500.00")
+    assert order.total_to == Decimal("10500.00")
+    assert order.has_bonus_spent is True
+
+
+async def test_admin_cards_are_tracked_and_cleared(
+    session: AsyncSession, make_user, pair: Pair, settings: Settings
+) -> None:
+    user = await make_user(1)
+    order = await orders_service.create_order(
+        session, user=user, pair=pair, amount_from=Decimal("100"), settings=settings
+    )
+
+    await orders_service.remember_admin_message(session, order, 111, 222)
+    await orders_service.remember_admin_message(session, order, 333, 444)
+    assert order.admin_message_refs == [(111, 222), (333, 444)]
+
+    refs = await orders_service.clear_admin_messages(session, order)
+    assert refs == [(111, 222), (333, 444)]
+    assert order.admin_message_refs == []

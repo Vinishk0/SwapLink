@@ -62,12 +62,17 @@ class AdminUserCB(CallbackData, prefix="admu"):
 
 
 class AdminOrderCB(CallbackData, prefix="admo"):
-    """Admin actions on an order: list | open | confirm | reject | amount."""
+    """Admin actions on an order: list | open | confirm | reject | amount | client.
+
+    `src` says where the button lives: `panel` — the admin screen, `note` — the
+    standalone "new order" card, which must not be repurposed by navigation.
+    """
 
     action: str
     order_id: int = 0
     page: int = 1
     status: str = "pending"
+    src: str = "panel"
 
 
 class AdminRateCB(CallbackData, prefix="admr"):

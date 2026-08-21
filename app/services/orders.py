@@ -74,12 +74,11 @@ async def create_order(
         pair_id=pair.id,
         from_code=quote.from_code,
         to_code=quote.to_code,
+        to_decimals=quote.to_decimals,
         amount_from=quote.amount_from,
         amount_to=quote.amount_to,
         rate=quote.rate,
-        base_commission_percent=quote.base_commission_percent,
         discount_percent=quote.discount_percent,
-        commission_percent=quote.commission_percent,
         discount_amount=quote.discount_amount,
         volume_base=quote.volume_base,
         referrer_id=user.referrer_id,
@@ -114,9 +113,8 @@ def _recalculate(
         order.rate = quote.rate
         order.amount_from = quote.amount_from
         order.amount_to = quote.amount_to
-        order.base_commission_percent = quote.base_commission_percent
+        order.to_decimals = quote.to_decimals
         order.discount_percent = quote.discount_percent
-        order.commission_percent = quote.commission_percent
         order.discount_amount = quote.discount_amount
         order.volume_base = quote.volume_base
         order.bonus_amount = quote.bonus_amount
@@ -124,15 +122,13 @@ def _recalculate(
 
     # Fallback: keep the historical rate, scale the volume proportionally.
     ratio = amount_from / order.amount_from if order.amount_from > ZERO else ZERO
-    discount = min(max(discount_percent, ZERO), order.base_commission_percent)
-    commission = order.base_commission_percent - discount
-    gross = amount_from * order.rate
+    discount = max(discount_percent, ZERO)
+    base_to = amount_from * order.rate
 
     order.amount_from = amount_from
-    order.amount_to = quantize(gross * (HUNDRED - commission) / HUNDRED, 8)
     order.discount_percent = discount
-    order.commission_percent = commission
-    order.discount_amount = quantize(gross * discount / HUNDRED, 8)
+    order.discount_amount = quantize(base_to * discount / HUNDRED, order.to_decimals)
+    order.amount_to = quantize(base_to, order.to_decimals) + order.discount_amount
     order.volume_base = quantize(order.volume_base * ratio, 8)
     order.bonus_amount = quantize(order.volume_base * bonus_percent / HUNDRED, 8)
 
@@ -229,6 +225,27 @@ async def update_pending_amount(
     return order
 
 
+async def apply_bonus_write_off(
+    session: AsyncSession, order: Order, *, amount_base: Decimal
+) -> Order:
+    """Record referral balance an admin applied to this deal.
+
+    Kept on the order so the card the operator works with always shows the real
+    amount the client walks away with.
+    """
+    if amount_base <= ZERO:
+        return order
+
+    order.bonus_spent += amount_base
+    if order.pair is not None:
+        rate_to_base = order.pair.to_currency.rate_to_base
+        if rate_to_base > ZERO:
+            converted = quantize(amount_base / rate_to_base, order.to_decimals)
+            order.bonus_spent_to += converted
+    await session.commit()
+    return order
+
+
 async def reject_order(
     session: AsyncSession, order: Order, *, admin_id: int, comment: str | None = None
 ) -> Order:
@@ -251,6 +268,22 @@ async def cancel_order(session: AsyncSession, order: Order, *, user: User) -> Or
     order.processed_at = datetime.now(UTC)
     await session.commit()
     return order
+
+
+async def clear_admin_messages(session: AsyncSession, order: Order) -> list[tuple[int, int]]:
+    """Return the tracked notification cards and forget them."""
+    refs = order.admin_message_refs
+    if refs:
+        order.admin_messages = None
+        await session.commit()
+    return refs
+
+
+async def remember_admin_message(
+    session: AsyncSession, order: Order, chat_id: int, message_id: int
+) -> None:
+    order.add_admin_message(chat_id, message_id)
+    await session.commit()
 
 
 # --------------------------------------------------------------------------- #
@@ -292,6 +325,17 @@ async def list_orders_page(
         )
     ).all()
     return rows, total
+
+
+async def latest_pending_for_user(session: AsyncSession, user_id: int) -> Order | None:
+    """The order an admin most likely means when writing off bonuses for a client."""
+    stmt = (
+        select(Order)
+        .where(Order.user_id == user_id, Order.status == OrderStatus.PENDING)
+        .order_by(Order.id.desc())
+        .limit(1)
+    )
+    return await session.scalar(stmt)
 
 
 async def count_pending(session: AsyncSession) -> int:

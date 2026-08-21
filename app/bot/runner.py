@@ -57,10 +57,14 @@ def build_dispatcher(
 ) -> Dispatcher:
     dispatcher = Dispatcher(storage=build_storage(settings))
     dispatcher["settings"] = settings
+    # `start_polling` injects this itself; setting it here keeps handlers that
+    # need the dispatcher (to reach another chat's FSM) working with
+    # `feed_update` and webhooks too.
+    dispatcher["dispatcher"] = dispatcher
 
     # Order matters: drop flood before touching the database, register the user
     # only for updates that survived.
-    dispatcher.update.outer_middleware(ThrottlingMiddleware())
+    dispatcher.update.outer_middleware(ThrottlingMiddleware(settings.throttle_interval))
     dispatcher.update.outer_middleware(DbSessionMiddleware(session_factory))
     dispatcher.update.outer_middleware(UserMiddleware(settings))
 

@@ -100,6 +100,7 @@ async def withdraw(
     tx_type: TransactionType,
     admin_id: int | None = None,
     comment: str | None = None,
+    order: Order | None = None,
 ) -> Transaction:
     """Spend part of the balance: a cash payout or a discount on a deal."""
     if tx_type not in WITHDRAWAL_TYPES:
@@ -108,7 +109,9 @@ async def withdraw(
         raise BalanceError("Сумма списания должна быть больше нуля.")
     if amount > user.balance:
         raise BalanceError(f"На балансе только {user.balance} — списать {amount} нельзя.")
-    return await _apply(session, user, -amount, tx_type, admin_id=admin_id, comment=comment)
+    return await _apply(
+        session, user, -amount, tx_type, admin_id=admin_id, comment=comment, order=order
+    )
 
 
 async def adjust(

@@ -1,4 +1,4 @@
-"""Keyboards of the admin panel."""
+"""Keyboards of the admin panel. Labels stay short so nothing gets truncated."""
 
 from __future__ import annotations
 
@@ -13,26 +13,33 @@ from app.bot.keyboards.callbacks import (
     AdminRateCB,
     AdminUserCB,
     ConfirmCB,
+    MenuCB,
     NoopCB,
 )
 from app.db.models import Currency, Order, OrderStatus, Pair, User
 from app.utils.format import format_money
 
+#: Where an order card is drawn — it decides which buttons make sense.
+SRC_PANEL = "panel"  # inside the admin screen, reached from the list
+SRC_NOTE = "note"  # the standalone "new order" card
+SRC_SCREEN = "screen"  # the screen, but not reached from the list
+
 
 def main(pending_orders: int = 0) -> InlineKeyboardMarkup:
-    pending_badge = f" ({pending_orders})" if pending_orders else ""
+    badge = f" ({pending_orders})" if pending_orders else ""
     builder = InlineKeyboardBuilder()
-    builder.button(text=f"📋 Заявки{pending_badge}", callback_data=AdminCB(section="orders"))
-    builder.button(text="👥 Пользователи", callback_data=AdminCB(section="users"))
-    builder.button(text="💱 Курсы и направления", callback_data=AdminCB(section="rates"))
+    builder.button(text=f"📋 Заявки{badge}", callback_data=AdminCB(section="orders"))
+    builder.button(text="👥 Люди", callback_data=AdminCB(section="users"))
+    builder.button(text="💱 Курсы", callback_data=AdminCB(section="rates"))
     builder.button(text="📊 Статистика", callback_data=AdminCB(section="stats"))
-    builder.adjust(2, 2)
+    builder.button(text="⬅️ Меню", callback_data=MenuCB(action="main"))
+    builder.adjust(2, 2, 1)
     return builder.as_markup()
 
 
 def back_to_main() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="⬅️ В админ-панель", callback_data=AdminCB(section="main"))
+    builder.button(text="⬅️ Админка", callback_data=AdminCB(section="main"))
     return builder.as_markup()
 
 
@@ -44,38 +51,35 @@ def back_to_main() -> InlineKeyboardMarkup:
 def users_list(users: Sequence[User], *, page: int, pages: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for user in users:
-        label = f"{user.full_name[:24]} · {format_money(user.balance)}"
         builder.row(
             InlineKeyboardButton(
-                text=label,
+                text=f"{user.full_name[:22]} · {format_money(user.balance)}",
                 callback_data=AdminUserCB(action="open", user_id=user.id, page=page).pack(),
             )
         )
-    builder.row(*_pager(AdminUserCB, action="list", page=page, pages=pages))
+    if pages > 1:
+        builder.row(*_pager(AdminUserCB, action="list", page=page, pages=pages))
     builder.row(
         InlineKeyboardButton(text="🔎 Поиск", callback_data=AdminUserCB(action="search").pack()),
-        InlineKeyboardButton(text="⬅️ Назад", callback_data=AdminCB(section="main").pack()),
+        InlineKeyboardButton(text="⬅️ Админка", callback_data=AdminCB(section="main").pack()),
     )
     return builder.as_markup()
 
 
-def user_card(user: User, *, page: int = 1) -> InlineKeyboardMarkup:
+def user_card(user: User, *, page: int = 1, order_id: int = 0) -> InlineKeyboardMarkup:
+    """`order_id` — the deal the operator came from; write-offs land on it."""
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="💸 Выплатить с баланса",
-        callback_data=AdminUserCB(action="payout", user_id=user.id, page=page),
+        text="💸 Выплатить", callback_data=AdminUserCB(action="payout", user_id=user.id, page=page)
     )
     builder.button(
-        text="🎫 Зачесть в скидку",
-        callback_data=AdminUserCB(action="discount", user_id=user.id, page=page),
+        text="🎫 В скидку", callback_data=AdminUserCB(action="discount", user_id=user.id, page=page)
     )
     builder.button(
-        text="✏️ Корректировка баланса",
-        callback_data=AdminUserCB(action="adjust", user_id=user.id, page=page),
+        text="✏️ Баланс ±", callback_data=AdminUserCB(action="adjust", user_id=user.id, page=page)
     )
     builder.button(
-        text="📜 История операций",
-        callback_data=AdminUserCB(action="history", user_id=user.id, page=page),
+        text="📜 История", callback_data=AdminUserCB(action="history", user_id=user.id, page=page)
     )
     builder.button(
         text="👥 Рефералы",
@@ -89,7 +93,13 @@ def user_card(user: User, *, page: int = 1) -> InlineKeyboardMarkup:
         text="🔓 Разблокировать" if user.is_blocked else "🚫 Заблокировать",
         callback_data=AdminUserCB(action="block", user_id=user.id, page=page),
     )
-    builder.button(text="⬅️ К списку", callback_data=AdminUserCB(action="list", page=page))
+    if order_id:
+        builder.button(
+            text="⬅️ К заявке",
+            callback_data=AdminOrderCB(action="open", order_id=order_id, src=SRC_SCREEN),
+        )
+    else:
+        builder.button(text="⬅️ К списку", callback_data=AdminUserCB(action="list", page=page))
     builder.adjust(2, 2, 2, 1, 1)
     return builder.as_markup()
 
@@ -97,8 +107,7 @@ def user_card(user: User, *, page: int = 1) -> InlineKeyboardMarkup:
 def back_to_user(user_id: int, *, page: int = 1) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="⬅️ К пользователю",
-        callback_data=AdminUserCB(action="open", user_id=user_id, page=page),
+        text="⬅️ К человеку", callback_data=AdminUserCB(action="open", user_id=user_id, page=page)
     )
     return builder.as_markup()
 
@@ -113,62 +122,83 @@ def orders_list(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for order in orders:
-        label = f"{order.status.short_title} #{order.id} · {order.direction}"
         builder.row(
             InlineKeyboardButton(
-                text=label,
+                text=f"{order.status.short_title} #{order.id} · {order.direction}",
                 callback_data=AdminOrderCB(
                     action="open", order_id=order.id, page=page, status=status
                 ).pack(),
             )
         )
-    builder.row(*_pager(AdminOrderCB, action="list", page=page, pages=pages, status=status))
+    if pages > 1:
+        builder.row(*_pager(AdminOrderCB, action="list", page=page, pages=pages, status=status))
     builder.row(
         InlineKeyboardButton(
-            text="⏳ Только новые" if status != "pending" else "📚 Все заявки",
+            text="⏳ Новые" if status != "pending" else "📚 Все",
             callback_data=AdminOrderCB(
                 action="list", page=1, status="pending" if status != "pending" else "all"
             ).pack(),
-        )
+        ),
+        InlineKeyboardButton(text="⬅️ Админка", callback_data=AdminCB(section="main").pack()),
     )
-    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=AdminCB(section="main").pack()))
     return builder.as_markup()
 
 
-def order_card(order: Order, *, page: int = 1, status: str = "pending") -> InlineKeyboardMarkup:
+def order_card(
+    order: Order, *, page: int = 1, status: str = "pending", src: str = SRC_PANEL
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    rows: list[int] = []
+
     if order.status is OrderStatus.PENDING:
         builder.button(
-            text="✅ Подтвердить",
+            text="✅ Провести",
             callback_data=AdminOrderCB(
-                action="confirm", order_id=order.id, page=page, status=status
+                action="confirm", order_id=order.id, page=page, status=status, src=src
             ),
         )
         builder.button(
             text="❌ Отклонить",
             callback_data=AdminOrderCB(
-                action="reject", order_id=order.id, page=page, status=status
+                action="reject", order_id=order.id, page=page, status=status, src=src
             ),
         )
         builder.button(
-            text="✏️ Изменить сумму",
+            text="✏️ Сумма",
             callback_data=AdminOrderCB(
-                action="amount", order_id=order.id, page=page, status=status
+                action="amount", order_id=order.id, page=page, status=status, src=src
             ),
         )
-    builder.button(
-        text="👤 Клиент",
-        callback_data=AdminUserCB(action="open", user_id=order.user_id),
-    )
-    builder.button(
-        text="⬅️ К списку",
-        callback_data=AdminOrderCB(action="list", page=page, status=status),
-    )
-    builder.adjust(2, 1, 2)
+        builder.button(
+            text="👤 Клиент",
+            callback_data=AdminOrderCB(
+                action="client", order_id=order.id, page=page, status=status, src=src
+            ),
+        )
+        rows += [2, 2]
+    else:
+        builder.button(
+            text="👤 Клиент",
+            callback_data=AdminOrderCB(
+                action="client", order_id=order.id, page=page, status=status, src=src
+            ),
+        )
+        rows.append(1)
+
+    if src == SRC_PANEL:
+        builder.button(
+            text="⬅️ К списку", callback_data=AdminOrderCB(action="list", page=page, status=status)
+        )
+        rows.append(1)
+    elif src == SRC_SCREEN:
+        builder.button(text="⬅️ Админка", callback_data=AdminCB(section="main"))
+        rows.append(1)
+
+    builder.adjust(*rows)
     return builder.as_markup()
 
 
-def confirm_order(order_id: int, *, page: int, status: str) -> InlineKeyboardMarkup:
+def confirm_order(order_id: int, *, page: int, status: str, src: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
         text="✅ Да, провести",
@@ -176,7 +206,9 @@ def confirm_order(order_id: int, *, page: int, status: str) -> InlineKeyboardMar
     )
     builder.button(
         text="⬅️ Отмена",
-        callback_data=AdminOrderCB(action="open", order_id=order_id, page=page, status=status),
+        callback_data=AdminOrderCB(
+            action="open", order_id=order_id, page=page, status=status, src=src
+        ),
     )
     builder.adjust(1)
     return builder.as_markup()
@@ -191,7 +223,7 @@ def rates_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🪙 Валюты", callback_data=AdminRateCB(action="currencies"))
     builder.button(text="🔁 Направления", callback_data=AdminRateCB(action="pairs"))
-    builder.button(text="⬅️ Назад", callback_data=AdminCB(section="main"))
+    builder.button(text="⬅️ Админка", callback_data=AdminCB(section="main"))
     builder.adjust(2, 1)
     return builder.as_markup()
 
@@ -207,28 +239,25 @@ def currencies_list(currencies: Sequence[Currency]) -> InlineKeyboardMarkup:
             )
         )
     builder.row(
-        InlineKeyboardButton(
-            text="➕ Добавить валюту", callback_data=AdminRateCB(action="cur_add").pack()
-        )
+        InlineKeyboardButton(text="➕ Валюта", callback_data=AdminRateCB(action="cur_add").pack()),
+        InlineKeyboardButton(text="⬅️ Назад", callback_data=AdminCB(section="rates").pack()),
     )
-    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=AdminCB(section="rates").pack()))
     return builder.as_markup()
 
 
 def currency_card(currency: Currency) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="✏️ Изменить курс",
-        callback_data=AdminRateCB(action="cur_rate", currency_id=currency.id),
+        text="✏️ Курс", callback_data=AdminRateCB(action="cur_rate", currency_id=currency.id)
     )
     builder.button(
-        text="🔕 Выключить" if currency.is_active else "🔔 Включить",
+        text="🔕 Выкл" if currency.is_active else "🔔 Вкл",
         callback_data=AdminRateCB(action="cur_toggle", currency_id=currency.id),
     )
     builder.button(
         text="🗑 Удалить", callback_data=AdminRateCB(action="cur_del", currency_id=currency.id)
     )
-    builder.button(text="⬅️ К валютам", callback_data=AdminRateCB(action="currencies"))
+    builder.button(text="⬅️ Валюты", callback_data=AdminRateCB(action="currencies"))
     builder.adjust(2, 2)
     return builder.as_markup()
 
@@ -239,24 +268,21 @@ def pairs_list(pairs: Sequence[Pair]) -> InlineKeyboardMarkup:
         mark = "" if pair.is_active else "⛔️ "
         builder.row(
             InlineKeyboardButton(
-                text=f"{mark}{pair.title} · {format_money(pair.commission_percent, 2)}%",
+                text=f"{mark}{pair.title} · {format_money(pair.effective_rate, 4)}",
                 callback_data=AdminRateCB(action="pair_open", pair_id=pair.id).pack(),
             )
         )
     builder.row(
         InlineKeyboardButton(
-            text="➕ Добавить направление", callback_data=AdminRateCB(action="pair_add").pack()
-        )
+            text="➕ Направление", callback_data=AdminRateCB(action="pair_add").pack()
+        ),
+        InlineKeyboardButton(text="⬅️ Назад", callback_data=AdminCB(section="rates").pack()),
     )
-    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=AdminCB(section="rates").pack()))
     return builder.as_markup()
 
 
 def pair_card(pair: Pair) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(
-        text="✏️ Комиссия", callback_data=AdminRateCB(action="pair_comm", pair_id=pair.id)
-    )
     builder.button(text="✏️ Курс", callback_data=AdminRateCB(action="pair_rate", pair_id=pair.id))
     if pair.is_manual_rate:
         builder.button(
@@ -266,12 +292,12 @@ def pair_card(pair: Pair) -> InlineKeyboardMarkup:
         text="📏 Лимиты", callback_data=AdminRateCB(action="pair_limits", pair_id=pair.id)
     )
     builder.button(
-        text="🔕 Выключить" if pair.is_active else "🔔 Включить",
+        text="🔕 Выкл" if pair.is_active else "🔔 Вкл",
         callback_data=AdminRateCB(action="pair_toggle", pair_id=pair.id),
     )
     builder.button(text="🗑 Удалить", callback_data=AdminRateCB(action="pair_del", pair_id=pair.id))
-    builder.button(text="⬅️ К направлениям", callback_data=AdminRateCB(action="pairs"))
-    builder.adjust(2, 2, 2, 1)
+    builder.button(text="⬅️ Направления", callback_data=AdminRateCB(action="pairs"))
+    builder.adjust(2, 2, 1, 1)
     return builder.as_markup()
 
 
@@ -281,8 +307,7 @@ def choose_currency(
     builder = InlineKeyboardBuilder()
     for currency in currencies:
         builder.button(
-            text=currency.code,
-            callback_data=AdminRateCB(action=action, currency_id=currency.id),
+            text=currency.code, callback_data=AdminRateCB(action=action, currency_id=currency.id)
         )
     builder.adjust(3)
     builder.row(

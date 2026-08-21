@@ -1,4 +1,8 @@
-"""Calculator maths: rates, commission, referral discount, bonus base."""
+"""Calculator maths: rates, referral discount, bonus base.
+
+There is no commission in the model at all — the rate an admin sets is what the
+client gets, and the referral discount is a bonus on top of it.
+"""
 
 from __future__ import annotations
 
@@ -23,24 +27,23 @@ def test_manual_rate_overrides_the_cross_rate(pair: Pair) -> None:
     assert pair.is_manual_rate is True
 
 
-def test_quote_without_discount(pair: Pair) -> None:
+def test_quote_without_discount_is_the_plain_rate(pair: Pair) -> None:
     quote = calculate_quote(pair, Decimal("100"))
 
-    assert quote.gross_to == Decimal("10000.00")
-    # 2% commission
-    assert quote.amount_to == Decimal("9800.00")
-    assert quote.commission_percent == Decimal("2")
+    assert quote.base_to == Decimal("10000.00")
+    assert quote.amount_to == Decimal("10000.00")
     assert quote.discount_amount == Decimal("0.00")
     assert quote.bonus_amount == Decimal("0")
+    assert quote.has_discount is False
 
 
-def test_discount_lowers_the_commission(pair: Pair) -> None:
+def test_discount_adds_on_top_of_the_rate(pair: Pair) -> None:
     quote = calculate_quote(pair, Decimal("100"), discount_percent=Decimal("0.5"))
 
-    assert quote.commission_percent == Decimal("1.5")
-    assert quote.amount_to == Decimal("9850.00")
-    # The referral keeps 0.5% of the gross amount
+    assert quote.base_to == Decimal("10000.00")
+    # +0.5% for the referral
     assert quote.discount_amount == Decimal("50.00")
+    assert quote.amount_to == Decimal("10050.00")
     assert quote.has_discount is True
 
 
@@ -51,12 +54,12 @@ def test_bonus_is_half_a_percent_of_the_volume_in_base_currency(pair: Pair) -> N
     assert quote.bonus_amount == Decimal("0.5")
 
 
-def test_discount_never_exceeds_the_commission(pair: Pair) -> None:
-    pair.commission_percent = Decimal("0.2")
-    quote = calculate_quote(pair, Decimal("100"), discount_percent=Decimal("0.5"))
+def test_manual_rate_is_used_for_the_quote(pair: Pair) -> None:
+    pair.rate = Decimal("90")
+    quote = calculate_quote(pair, Decimal("10"))
 
-    assert quote.commission_percent == Decimal("0")
-    assert quote.discount_percent == Decimal("0.2")
+    assert quote.rate == Decimal("90")
+    assert quote.amount_to == Decimal("900.00")
 
 
 def test_zero_amount_is_rejected(pair: Pair) -> None:

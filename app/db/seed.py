@@ -58,7 +58,6 @@ async def seed_demo_data(session: AsyncSession, settings: Settings) -> None:
             Pair(
                 from_currency_id=currencies[from_code].id,
                 to_currency_id=currencies[to_code].id,
-                commission_percent=settings.default_commission_percent,
             )
         )
     await session.commit()

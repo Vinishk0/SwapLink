@@ -33,11 +33,12 @@ class Currency(TimestampMixin, Base):
 
 
 class Pair(TimestampMixin, Base):
-    """An exchange direction `from -> to` with its own commission.
+    """An exchange direction `from -> to`.
 
-    `rate` is optional: when empty the cross-rate is derived from the currencies'
-    `rate_to_base`, so an admin can maintain either per-currency rates or an
-    explicit rate for a specific direction.
+    The rate an administrator enters is the final client rate — the margin of the
+    exchange office is already baked into it, so the bot never adds a commission
+    of its own. `rate` is optional: when empty the cross-rate is derived from the
+    currencies' `rate_to_base`.
     """
 
     __tablename__ = "pairs"
@@ -51,7 +52,6 @@ class Pair(TimestampMixin, Base):
         ForeignKey("currencies.id", ondelete="CASCADE"), nullable=False, index=True
     )
     rate: Mapped[Decimal | None] = mapped_column(default=None)
-    commission_percent: Mapped[Decimal] = mapped_column(nullable=False)
     min_amount: Mapped[Decimal | None] = mapped_column(default=None)
     max_amount: Mapped[Decimal | None] = mapped_column(default=None)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")

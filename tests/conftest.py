@@ -27,7 +27,6 @@ def settings() -> Settings:
         referral_discount_percent=Decimal("0.5"),
         referral_bonus_percent=Decimal("0.5"),
         referral_discount_limit=3,
-        default_commission_percent=Decimal("2"),
     )
 
 
@@ -60,17 +59,13 @@ async def make_user(session: AsyncSession):
 
 @pytest.fixture
 async def pair(session: AsyncSession) -> Pair:
-    """USDT -> RUB at 100 RUB per USDT with a 2% commission."""
+    """USDT -> RUB at 100 RUB per USDT (the rate is final, no commission)."""
     usdt = Currency(code="USDT", name="Tether", rate_to_base=Decimal("1"), decimals=2)
     rub = Currency(code="RUB", name="Рубль", rate_to_base=Decimal("0.01"), decimals=2)
     session.add_all([usdt, rub])
     await session.flush()
 
-    exchange_pair = Pair(
-        from_currency_id=usdt.id,
-        to_currency_id=rub.id,
-        commission_percent=Decimal("2"),
-    )
+    exchange_pair = Pair(from_currency_id=usdt.id, to_currency_id=rub.id)
     session.add(exchange_pair)
     await session.commit()
     await session.refresh(exchange_pair)

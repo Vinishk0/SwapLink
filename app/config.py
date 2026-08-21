@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     #: would otherwise arrive as an int instead of a list.
     admin_ids: Annotated[list[int], NoDecode] = Field(default_factory=list)
     drop_pending_updates: bool = True
+    #: Minimum seconds between two updates from the same user (0 disables it).
+    throttle_interval: float = 0.35
 
     # --- Database ---
     database_url: str = "sqlite+aiosqlite:///data/swaplink.db"
@@ -44,7 +46,6 @@ class Settings(BaseSettings):
 
     # --- Exchange ---
     base_currency: str = "USDT"
-    default_commission_percent: Decimal = Decimal("2")
     seed_demo_data: bool = False
 
     # --- Misc ---
